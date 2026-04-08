@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: us-east-2
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-2.amazonaws.com
-  ECR_REPOSITORY: talha-cicd-portfolio
+  ECR_REPOSITORY: myapp
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -180,7 +180,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --name talha-cicd-portfolio-staging
+          aws eks update-kubeconfig --name myapp-staging
 
       - name: Deploy to staging (canary 30%)
         run: |
@@ -223,7 +223,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --name talha-cicd-portfolio-production
+          aws eks update-kubeconfig --name myapp-production
 
       - name: Deploy to production (canary 20%)
         run: |

@@ -2,10 +2,10 @@ terraform {
   required_version = ">= 1.11"
 
   backend "s3" {
-    bucket         = "talha-terraform-state"
-    key            = "production/terraform.tfstate"
-    region         = "us-east-2"
-    dynamodb_table = "terraform-locks"
+    bucket         = var.tf_state_bucket
+    key            = var.tf_state_key
+    region         = var.region
+    dynamodb_table = var.tf_dynamodb_table
     encrypt        = true
   }
 
