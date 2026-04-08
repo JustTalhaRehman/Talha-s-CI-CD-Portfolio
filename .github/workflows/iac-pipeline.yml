@@ -1,0 +1,260 @@
+name: Infrastructure Pipeline
+
+on:
+  pull_request:
+    paths: ['terraform/**']
+  push:
+    paths: ['terraform/**']
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-2
+  TF_STATE_BUCKET: talha-terraform-state
+  TF_STATE_KEY: production/terraform.tfstate
+
+jobs:
+  detect-changes:
+    name: Detect Terraform Changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform-changed: ${{ steps.changes.outputs.terraform-changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for Terraform changes
+        id: changes
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^terraform/'; then
+            echo "terraform-changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "terraform-changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.terraform-changed == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11'
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Terraform Init
+        run: |
+          cd terraform/
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: |
+          cd terraform/
+          terraform validate
+
+      - name: Run TFLint
+        uses: terraform-linters/tflint@v1
+        with:
+          args: --recursive terraform/
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.detect-changes.outputs.terraform-changed == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1
+        with:
+          working_directory: terraform/
+
+      - name: Run Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@v2
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: reports/checkov.sarif
+
+      - name: Upload Checkov results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: reports/checkov.sarif
+
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [detect-changes, security-scan]
+    if: needs.detect-changes.outputs.terraform-changed == 'true'
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11'
+
+      - name: Terraform Init
+        run: |
+          cd terraform/
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd terraform/
+          terraform plan -no-color -out=terraform.tfplan
+        continue-on-error: true
+
+      - name: Parse Terraform Plan Output
+        id: parse-plan
+        run: |
+          cd terraform/
+          terraform show -json terraform.tfplan > terraform.tfplan.json
+          echo "plan-exists=true" >> $GITHUB_OUTPUT
+
+      - name: Post Plan as PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/terraform.tfplan', 'utf8');
+            
+            const comment = `## Terraform Plan
+            
+            \`\`\`hcl
+            ${plan}
+            \`\`\`
+            
+            ---
+            *This plan was generated automatically. Review before applying.*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/terraform.tfplan
+          retention-days: 7
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [detect-changes, plan]
+    if: |
+      needs.detect-changes.outputs.terraform-changed == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11'
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/
+
+      - name: Terraform Init
+        run: |
+          cd terraform/
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd terraform/
+          terraform apply terraform.tfplan
+
+      - name: Update outputs
+        id: outputs
+        run: |
+          cd terraform/
+          terraform output -json > outputs.json
+          echo "outputs-updated=true" >> $GITHUB_OUTPUT
+
+      - name: Post Apply Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const outputs = JSON.parse(fs.readFileSync('terraform/outputs.json', 'utf8'));
+            
+            let outputTable = '| Resource | Value |\n|----------|-------|\n';
+            
+            Object.keys(outputs).forEach(key => {
+              const value = typeof outputs[key].value === 'object' 
+                ? JSON.stringify(outputs[key].value) 
+                : outputs[key].value;
+              outputTable += `| ${key} | ${value} |\n`;
+            });
+            
+            const summary = `## Terraform Apply Complete
+            
+            ### Updated Resources:
+            
+            ${outputTable}
+            
+            ---
+            *Infrastructure updated successfully on $(date +%Y-%m-%d)*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number || 1,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  notify:
+    name: Notify Infrastructure Changes
+    runs-on: ubuntu-latest
+    needs: [apply]
+    if: always() && needs.apply.result == 'success'
+    steps:
+      - name: Notify Slack on success
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"Infrastructure updated successfully! Commit: ${{ github.sha }}"}' \
+            ${{ secrets.SLACK_WEBHOOK }}
