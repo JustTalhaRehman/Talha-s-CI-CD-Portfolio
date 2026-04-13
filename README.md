@@ -1,153 +1,92 @@
-# Production-Grade CI/CD Pipeline created by Talha
-Production-grade CI/CD pipeline with GitHub Actions — automated testing, security scanning, Docker builds, canary deployments to EKS, and Terraform infrastructure management for AWS.
+# CI/CD Pipeline
 
-End-to-end CI/CD and Infrastructure-as-Code pipeline built with GitHub Actions, Terraform, Kubernetes, and AWS.
+End-to-end CI/CD pipeline with GitHub Actions, Terraform, Kubernetes, and AWS. The app is a simple FastAPI service — the focus is the pipeline and infrastructure around it.
 
-## What's Included
+## What's in here
 
-### CI/CD Pipeline (`.github/workflows/ci.yml`)
+**App** (`app/`) — FastAPI service with `/health`, `/ready`, `/metrics`, and `/users` endpoints. Uses PostgreSQL and Redis.
 
-Automated application delivery pipeline with 5 stages:
+**CI/CD** (`.github/workflows/ci.yml`) — Runs on every PR and merge to `main`:
 
-| Stage | What It Does |
+| Stage | What it does |
 |-------|-------------|
-| **Lint & Format** | Code quality checks with Ruff |
-| **Test** | Unit & integration tests with PostgreSQL and Redis service containers, coverage reporting |
-| **Security Scan** | Filesystem vulnerability scanning with Trivy, results uploaded to GitHub Security tab |
-| **Build & Push** | Multi-stage Docker build, push to ECR with SBOM and provenance, image vulnerability scan |
-| **Deploy** | Canary deployment to Staging → smoke tests → promote → Production with manual approval |
+| Lint & Format | Ruff + Black checks |
+| Test | pytest with real Postgres and Redis service containers |
+| Security Scan | Trivy filesystem scan, results uploaded to GitHub Security tab |
+| Build & Push | Docker image built and pushed to Amazon ECR |
+| Deploy | Staging → smoke tests → Production (manual approval gate) |
 
-**Trigger:** Runs on every pull request (lint, test, security). Build and deploy only on merge to `main`.
+**Infrastructure Pipeline** (`.github/workflows/iac-pipeline.yml`) — Triggered only when `terraform/` files change. Validates, runs tfsec + Checkov, posts the plan as a PR comment, and applies on merge to `main`.
 
-### Infrastructure Pipeline (`.github/workflows/iac-pipeline.yml`)
+**Infrastructure** (`terraform/`) — VPC, EKS cluster, ECR, RDS PostgreSQL, ElastiCache Redis.
 
-GitOps-driven infrastructure management:
+**Kubernetes** (`k8s/`) — Staging and production manifests with HPA, resource limits, and non-root containers.
 
-| Stage | What It Does |
-|-------|-------------|
-| **Detect Changes** | Auto-detects which Terraform directories changed |
-| **Validate** | Format check, `terraform validate`, TFLint across changed directories |
-| **Security** | Static analysis with tfsec and Checkov |
-| **Plan** | Generates plan, posts output as PR comment for review |
-| **Apply** | Auto-applies on merge to `main` with manual environment approval |
+## Pipeline Flow
 
-**Trigger:** Runs only when files under `terraform/` change.
+```
+Pull Request opened
+  ├── Lint & Format
+  ├── Tests (Postgres + Redis containers)
+  └── Security Scan
+          │
+          ▼  merge to main
+  Build Docker image → push to ECR
+          │
+          ▼
+  Deploy to Staging → smoke tests
+          │
+          ▼
+  Deploy to Production (requires approval) → smoke tests
+          │
+          ▼
+  Slack notification
+```
 
-### Infrastructure (Terraform)
+## Setup
 
-Production-ready AWS infrastructure:
+See [`setup/aws-setup.md`](setup/aws-setup.md) for the one-time AWS prep — S3/DynamoDB for Terraform state, GitHub OIDC provider, and IAM roles.
 
-- **VPC** — Multi-AZ (3 AZs), public/private subnets, NAT gateways
-- **EKS** — Managed Kubernetes cluster with IRSA, managed node groups, core add-ons
-- **ECR** — Container registry with immutable tags, scan-on-push, lifecycle policy
-- **RDS PostgreSQL** — Multi-AZ, encrypted, performance insights, 14-day backups
-- **ElastiCache Redis** — Multi-node replication group, encryption at rest and in transit, auto-failover
-
-### Kubernetes Manifests
-
-- **Deployment** — 3 replicas, rolling update, topology spread across AZs
-- **Service** — ClusterIP service
-- **HPA** — Auto-scaling based on CPU (70%) and memory (80%) with scale-up/down policies
-- **Security** — Non-root container, read-only filesystem, dropped capabilities, secret references
-
-### Dockerfile
-
-Multi-stage build with:
-- Non-root user
-- Health check
-- Gunicorn production server
-
-## How to Use
-
-### Prerequisites
-
-- AWS account with IAM OIDC provider configured for GitHub Actions
-- GitHub repository with the following secrets configured:
+### Required GitHub Secrets
 
 | Secret | Description |
 |--------|-------------|
-| `AWS_OIDC_ROLE` | IAM role ARN for GitHub Actions (staging) |
-| `AWS_PROD_OIDC_ROLE` | IAM role ARN for GitHub Actions (production) |
-| `SLACK_WEBHOOK` | Slack incoming webhook URL for notifications |
+| `AWS_ACCOUNT_ID` | AWS account ID |
+| `AWS_OIDC_ROLE` | IAM role ARN for staging |
+| `AWS_PROD_OIDC_ROLE` | IAM role ARN for production |
+| `SLACK_WEBHOOK` | Slack incoming webhook URL |
 
-- GitHub environments created: `staging` and `production` (with required reviewers on production)
+### GitHub Environments
 
-### Step 1: Set Up Infrastructure
+Create two environments in your repo settings:
+- `staging` — no restrictions
+- `production` — add required reviewers
 
-```bash
-cd terraform/
-
-# Initialize Terraform (update backend config in main.tf first)
-terraform init
-
-# Review the plan
-terraform plan
-
-# Apply
-terraform apply
-```
-
-### Step 2: Push Application Code
+## Running locally
 
 ```bash
-# Create a feature branch
-git checkout -b feature/my-change
+# Start the app with Postgres and Redis
+docker compose up
 
-# Make changes, commit, push
-git add .
-git commit -m "feat: add new feature"
-git push origin feature/my-change
-
-# Open a pull request — CI pipeline runs automatically
-# On merge to main — build, push, and deploy kicks in
+# App will be available at http://localhost:8000
 ```
 
-### Step 3: Infrastructure Changes
+Or without Docker:
 
 ```bash
-# Modify any file under terraform/
-# Open a PR — plan is generated and posted as a comment
-# On merge — changes are applied automatically
+pip install -r requirements.txt
+
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/appdb
+export REDIS_URL=redis://localhost:6379/0
+
+pytest           # run tests
+uvicorn app.main:app --reload   # start the app
 ```
-
-### Pipeline Flow
-
-```
-Pull Request Opened
-    │
-    ├── Lint & Format
-    ├── Unit & Integration Tests (PostgreSQL + Redis)
-    └── Security Scan (Trivy)
-         │
-         ▼ (all pass)
-Merge to main
-    │
-    ▼
-Build Docker Image → Push to ECR → Scan Image
-    │
-    ▼
-Deploy to Staging (canary 30%) → Smoke Tests → Promote
-    │
-    ▼
-Deploy to Production (canary 20%) → Smoke Tests → Promote
-    │
-    ▼
-Slack Notification
-```
-
-## Customization
-
-1. **Change application type** — Replace Python/Ruff/pytest steps in `ci.yml` with your stack (Node, Go, Java, etc.)
-2. **Change cloud provider** — Replace AWS-specific steps and Terraform modules with your provider
-3. **Add environments** — Duplicate the staging deploy job for additional environments (dev, QA)
-4. **Adjust scaling** — Modify HPA thresholds and replica counts in `k8s/production/deployment.yaml`
-5. **Add monitoring** — Integrate Prometheus/Grafana by adding ServiceMonitor and dashboard resources
 
 ## Tech Stack
 
 - **CI/CD:** GitHub Actions
-- **Infrastructure:** Terraform, AWS (EKS, VPC, ECR, RDS, ElastiCache)
+- **Infrastructure:** Terraform, AWS (EKS, ECR, RDS, ElastiCache)
 - **Containers:** Docker, Kubernetes
 - **Security:** Trivy, tfsec, Checkov
-- **Deployment Strategy:** Canary with automatic promotion
-- **Notifications:** Slack
+- **App:** Python, FastAPI, PostgreSQL, Redis

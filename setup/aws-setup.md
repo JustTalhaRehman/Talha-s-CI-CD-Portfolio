@@ -124,9 +124,9 @@ aws iam get-role --role-name github-actions-staging-role --query Role.Arn --outp
 aws iam get-role --role-name github-actions-production-role --query Role.Arn --output text
 ```
 
-## Step 5: Configure GitHub Secrets
+## Step 5: Configure GitHub Secrets and Variables
 
-Go to your GitHub repository settings and add these secrets:
+Go to your GitHub repository settings and add these **secrets** (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |--------|-------|
@@ -134,6 +134,13 @@ Go to your GitHub repository settings and add these secrets:
 | `AWS_OIDC_ROLE` | ARN of staging role |
 | `AWS_PROD_OIDC_ROLE` | ARN of production role |
 | `SLACK_WEBHOOK` | Your Slack webhook URL |
+
+Add these **variables** (not secrets — they are not sensitive):
+
+| Variable | Value |
+|----------|-------|
+| `TF_STATE_BUCKET` | Name of your S3 bucket (e.g. `myapp-terraform-state`) |
+| `TF_DYNAMODB_TABLE` | Name of your DynamoDB table (e.g. `terraform-locks`) |
 
 ## Step 6: Create GitHub Environments
 

@@ -2,11 +2,7 @@ terraform {
   required_version = ">= 1.11"
 
   backend "s3" {
-    bucket         = var.tf_state_bucket
-    key            = var.tf_state_key
-    region         = var.region
-    dynamodb_table = var.tf_dynamodb_table
-    encrypt        = true
+    encrypt = true
   }
 
   required_providers {
@@ -33,9 +29,6 @@ provider "aws" {
   }
 }
 
-# -------------------------------------------
-# EKS Cluster
-# -------------------------------------------
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
@@ -68,9 +61,6 @@ module "eks" {
   }
 }
 
-# -------------------------------------------
-# VPC
-# -------------------------------------------
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
@@ -96,9 +86,6 @@ module "vpc" {
   }
 }
 
-# -------------------------------------------
-# ECR Repository
-# -------------------------------------------
 resource "aws_ecr_repository" "app" {
   name                 = var.project
   image_tag_mutability = "IMMUTABLE"
@@ -134,9 +121,6 @@ resource "aws_ecr_lifecycle_policy" "app" {
   })
 }
 
-# -------------------------------------------
-# RDS PostgreSQL
-# -------------------------------------------
 module "rds" {
   source  = "terraform-aws-modules/rds/aws"
   version = "~> 6.0"
@@ -179,9 +163,6 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# -------------------------------------------
-# ElastiCache Redis
-# -------------------------------------------
 resource "aws_elasticache_replication_group" "redis" {
   replication_group_id = "${var.project}-${var.environment}"
   description          = "Redis cluster for ${var.project}"

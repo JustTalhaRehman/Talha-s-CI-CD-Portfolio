@@ -143,12 +143,10 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
-          docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest .
-
-      - name: Generate SBOM
-        run: |
-          docker sbom ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} > sbom.json
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest \
+            .
 
       - name: Push Docker image to ECR
         run: |
@@ -182,26 +180,16 @@ jobs:
         run: |
           aws eks update-kubeconfig --name myapp-staging
 
-      - name: Deploy to staging (canary 30%)
+      - name: Deploy to staging
         run: |
-          # Update image in deployment
           sed -i 's|PLACEHOLDER_IMAGE|${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}|' k8s/staging/deployment.yaml
-          
-          # Apply canary deployment
           kubectl apply -f k8s/staging/
-          
-          # Wait for rollout
           kubectl rollout status deployment/myapp -n staging --timeout=300s
 
       - name: Run smoke tests
         run: |
-          # Wait for pods to be ready
           kubectl wait --for=condition=ready pod -l app=myapp -n staging --timeout=300s
-          
-          # Get service URL
           SERVICE_URL=$(kubectl get service myapp -n staging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          
-          # Run health check
           curl -f http://$SERVICE_URL/health || exit 1
 
   deploy-production:
@@ -225,35 +213,17 @@ jobs:
         run: |
           aws eks update-kubeconfig --name myapp-production
 
-      - name: Deploy to production (canary 20%)
+      - name: Deploy to production
         run: |
-          # Update image in deployment
           sed -i 's|PLACEHOLDER_IMAGE|${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}|' k8s/production/deployment.yaml
-          
-          # Apply canary deployment
           kubectl apply -f k8s/production/
-          
-          # Wait for rollout
           kubectl rollout status deployment/myapp -n production --timeout=300s
 
       - name: Run smoke tests
         run: |
-          # Wait for pods to be ready
           kubectl wait --for=condition=ready pod -l app=myapp -n production --timeout=300s
-          
-          # Get service URL
           SERVICE_URL=$(kubectl get service myapp -n production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          
-          # Run health check
           curl -f http://$SERVICE_URL/health || exit 1
-
-      - name: Promote canary to full deployment
-        run: |
-          # Scale up to full deployment
-          kubectl scale deployment myapp --replicas=3 -n production
-          
-          # Wait for rollout
-          kubectl rollout status deployment/myapp -n production --timeout=300s
 
   notify:
     name: Notify Slack

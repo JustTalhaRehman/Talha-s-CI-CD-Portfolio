@@ -6,9 +6,9 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
-app = FastAPI(title="Talha's CI/CD Portfolio App")
+app = FastAPI(title="Talha's CI/CD Project")
 
-# Database connection
+
 def get_db_connection():
     try:
         conn = psycopg2.connect(
@@ -19,69 +19,60 @@ def get_db_connection():
         print(f"Database connection error: {e}")
         return None
 
-# Redis connection
+
 def get_redis_connection():
     try:
-        r = redis.Redis(
-            connection_string=os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        )
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
         return r
     except Exception as e:
         print(f"Redis connection error: {e}")
         return None
 
+
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Talha's CI/CD Portfolio Application!"}
+    return {"message": "You're looking at Talha's CI/CD project. The app is live and running."}
+
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Kubernetes probes"""
     return {"status": "healthy", "version": "1.0.0"}
+
 
 @app.get("/ready")
 async def readiness_check():
-    """Readiness check - verifies database and redis connections"""
     db_status = "connected" if get_db_connection() else "disconnected"
     redis_status = "connected" if get_redis_connection() else "disconnected"
-    
+
     return {
         "status": "ready" if db_status == "connected" and redis_status == "connected" else "not_ready",
         "database": db_status,
-        "redis": redis_status
+        "redis": redis_status,
     }
+
 
 @app.get("/metrics")
 async def metrics():
-    """Simple metrics endpoint"""
     try:
         redis_conn = get_redis_connection()
-        if redis_conn:
-            visits = redis_conn.incr("visits")
-        else:
-            visits = 0
-    except:
+        visits = redis_conn.incr("visits") if redis_conn else 0
+    except Exception:
         visits = 0
-    
-    return {
-        "visits": visits,
-        "status": "ok"
-    }
+
+    return {"visits": visits, "status": "ok"}
+
 
 class User(BaseModel):
     name: str
     email: str
 
+
 @app.post("/users")
 async def create_user(user: User):
-    """Create a new user in database"""
     conn = get_db_connection()
     if not conn:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Database unavailable"}
-        )
-    
+        return JSONResponse(status_code=503, content={"error": "Database unavailable"})
+
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
@@ -92,50 +83,38 @@ async def create_user(user: User):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
             cur.execute(
                 "INSERT INTO users (name, email) VALUES (%s, %s) RETURNING id, name, email, created_at",
-                (user.name, user.email)
+                (user.name, user.email),
             )
-            
             result = cur.fetchone()
             conn.commit()
-            
             return {"user": dict(result)}
-    
     except Exception as e:
         conn.rollback()
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Failed to create user: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"error": f"Failed to create user: {str(e)}"})
     finally:
         conn.close()
 
+
 @app.get("/users")
 async def get_users():
-    """Get all users from database"""
     conn = get_db_connection()
     if not conn:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Database unavailable"}
-        )
-    
+        return JSONResponse(status_code=503, content={"error": "Database unavailable"})
+
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC")
             users = cur.fetchall()
-            return {"users": [dict(user) for user in users]}
-    
+            return {"users": [dict(u) for u in users]}
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Failed to fetch users: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"error": f"Failed to fetch users: {str(e)}"})
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
