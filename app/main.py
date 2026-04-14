@@ -12,7 +12,9 @@ app = FastAPI(title="Talha's CI/CD Project")
 def get_db_connection():
     try:
         conn = psycopg2.connect(
-            os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db")
+            os.getenv(
+                "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db"
+            )
         )
         return conn
     except Exception as e:
@@ -31,7 +33,9 @@ def get_redis_connection():
 
 @app.get("/")
 async def root():
-    return {"message": "You're looking at Talha's CI/CD project. The app is live and running."}
+    return {
+        "message": "You're looking at Talha's CI/CD project. The app is live and running."
+    }
 
 
 @app.get("/health")
@@ -45,7 +49,11 @@ async def readiness_check():
     redis_status = "connected" if get_redis_connection() else "disconnected"
 
     return {
-        "status": "ready" if db_status == "connected" and redis_status == "connected" else "not_ready",
+        "status": (
+            "ready"
+            if db_status == "connected" and redis_status == "connected"
+            else "not_ready"
+        ),
         "database": db_status,
         "redis": redis_status,
     }
@@ -92,7 +100,9 @@ async def create_user(user: User):
             return {"user": dict(result)}
     except Exception as e:
         conn.rollback()
-        return JSONResponse(status_code=500, content={"error": f"Failed to create user: {str(e)}"})
+        return JSONResponse(
+            status_code=500, content={"error": f"Failed to create user: {str(e)}"}
+        )
     finally:
         conn.close()
 
@@ -105,11 +115,15 @@ async def get_users():
 
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC")
+            cur.execute(
+                "SELECT id, name, email, created_at FROM users ORDER BY created_at DESC"
+            )
             users = cur.fetchall()
             return {"users": [dict(u) for u in users]}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Failed to fetch users: {str(e)}"})
+        return JSONResponse(
+            status_code=500, content={"error": f"Failed to fetch users: {str(e)}"}
+        )
     finally:
         conn.close()
 

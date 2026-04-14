@@ -68,10 +68,14 @@ jobs:
           cd terraform/
           terraform validate
 
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
       - name: Run TFLint
-        uses: terraform-linters/tflint@v1
-        with:
-          args: --recursive terraform/
+        working-directory: terraform/
+        run: |
+          tflint --init
+          tflint
 
   security-scan:
     name: Security Scan
@@ -97,7 +101,7 @@ jobs:
           output_file_path: reports/checkov.sarif
 
       - name: Upload Checkov results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: reports/checkov.sarif
 

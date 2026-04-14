@@ -40,7 +40,9 @@ def test_metrics():
 
 
 def test_create_user():
-    response = client.post("/users", json={"name": "Test User", "email": "test@example.com"})
+    response = client.post(
+        "/users", json={"name": "Test User", "email": "test@example.com"}
+    )
     assert response.status_code in [200, 503]
 
 
